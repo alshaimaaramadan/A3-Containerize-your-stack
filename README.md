@@ -292,11 +292,10 @@ docker compose exec db psql -U taskapi -d taskapi -c "SELECT * FROM tasks ORDER 
 
 ## Proving persistence
 
-> **Status: written, not yet run.** Docker Desktop is not installed on the machine this was built
-> on (`docker` is not on `PATH`, and WSL is unregistered), so the transcript below has deliberately
-> been left empty rather than filled in with output that was never produced. The procedure is
-> exact; run it and paste what you get. Everything that *could* be verified without Docker was —
-> see [A note on how this was checked](#a-note-on-how-this-was-checked).
+> **Status: run, and the output below is what it printed.** Executed end to end on 2026-08-26
+> against Docker 29.7.2 / Compose v5.4.0 on Windows 11, starting from `docker compose down -v` so
+> the first step really was a cold start. Every block below is pasted from that run rather than
+> written from expectation — see [A note on how this was checked](#a-note-on-how-this-was-checked).
 
 The claim to test is not "the database saves things". It is: **the data outlives both containers.**
 So the test restarts the app, then destroys and recreates the containers, and then — as a control —
@@ -312,7 +311,12 @@ docker compose up -d
 curl.exe http://localhost:8000/tasks
 ```
 
-<!-- paste output: expect the three seed tasks, ids 1-3 -->
+```json
+[{"id":1,"title":"Read the assignment","done":true},{"id":2,"title":"Build the API","done":false},{"id":3,"title":"Write the README","done":false}]
+```
+
+The three seed tasks, ids 1-3 — inserted by `001_schema.sql`, which ran because the volume was
+brand new and the data directory was empty.
 
 **2. Create a row of your own**
 
@@ -320,7 +324,14 @@ curl.exe http://localhost:8000/tasks
 curl.exe -X POST http://localhost:8000/tasks -H "Content-Type: application/json" -d "{\"title\":\"Survive the restart\"}"
 ```
 
-<!-- paste output: expect 201 and {"id":4,"title":"Survive the restart","done":false} -->
+```json
+{"id":4,"title":"Survive the restart","done":false}
+```
+
+Status `201`. Note the id: `4`, not a duplicate of `1`. That is the `setval` at the bottom of
+`001_schema.sql` doing its job — the three seed rows claimed their ids explicitly and left the
+identity sequence still pointing at 1, and without that nudge this first POST would have failed on
+a duplicate primary key.
 
 **3. Restart the app container only** — this is the test the old version failed
 
@@ -329,7 +340,12 @@ docker compose restart api
 curl.exe http://localhost:8000/tasks
 ```
 
-<!-- paste output: expect all four tasks. The list-backed version came back with three. -->
+```json
+[{"id":1,"title":"Read the assignment","done":true},{"id":2,"title":"Build the API","done":false},{"id":3,"title":"Write the README","done":false},{"id":4,"title":"Survive the restart","done":false}]
+```
+
+All four. The list-backed version came back with three, because the list lived in the process that
+had just been replaced.
 
 **4. Destroy both containers and bring them back**
 
@@ -343,7 +359,25 @@ docker compose up -d
 curl.exe http://localhost:8000/tasks
 ```
 
-<!-- paste output: expect all four tasks, from a database process that did not exist a moment ago -->
+```
+$ docker compose ps -a
+NAME      IMAGE     COMMAND   SERVICE   CREATED   STATUS    PORTS
+
+$ docker volume ls
+DRIVER    VOLUME NAME
+local     taskapi_pgdata
+```
+
+Nothing running, and the volume still there. After `up -d`:
+
+```json
+[{"id":1,"title":"Read the assignment","done":true},{"id":2,"title":"Build the API","done":false},{"id":3,"title":"Write the README","done":false},{"id":4,"title":"Survive the restart","done":false}]
+```
+
+All four tasks, served by a database process that did not exist a moment earlier. The db log for
+this boot says `Database directory appears to contain a database; Skipping initialization` — the
+schema file was not re-run, and these rows are the ones written before the containers were
+deleted.
 
 **5. Confirm it is really on disk, not in the app**
 
@@ -351,7 +385,17 @@ curl.exe http://localhost:8000/tasks
 docker compose exec db psql -U taskapi -d taskapi -c "SELECT id, title, done FROM tasks ORDER BY id;"
 ```
 
-<!-- paste output: expect the same four rows, read straight from Postgres -->
+```
+ id |        title        | done
+----+---------------------+------
+  1 | Read the assignment | t
+  2 | Build the API       | f
+  3 | Write the README    | f
+  4 | Survive the restart | f
+(4 rows)
+```
+
+The same four rows, read out of Postgres directly, with the API not involved.
 
 **6. The control: delete the volume and watch the data go**
 
@@ -364,19 +408,24 @@ docker compose up -d
 curl.exe http://localhost:8000/tasks
 ```
 
-<!-- paste output: expect three seed tasks. "Survive the restart" is gone, because the volume it
-     lived on is gone, and an empty data directory made Postgres run 001_schema.sql again. -->
+```json
+[{"id":1,"title":"Read the assignment","done":true},{"id":2,"title":"Build the API","done":false},{"id":3,"title":"Write the README","done":false}]
+```
+
+Three seed tasks. "Survive the restart" is gone, because the volume it lived on is gone, and an
+empty data directory made Postgres run `001_schema.sql` again. This is the step that rules out
+something else quietly holding the state: remove the volume and the data goes with it.
 
 ### A note on how this was checked
 
-Because Docker was not available, the parts that do not need it were verified directly, and the
-part that does was not:
+Both halves have now been checked, by different means:
 
 | What | How | Result |
 |---|---|---|
 | Routes, service, error shapes, filtering, id handling, OpenAPI | 42 assertions against the API through `TestClient`, with `InMemoryTaskRepository` swapped in exactly the way `main.py` documents | **All pass** |
 | That the swap is really a swap | The same test suite drives the app through the same routes and service with the other repository behind them | **All pass** |
-| SQL, the schema, the container build, persistence | Requires Docker | **Not run** |
+| SQL, the schema, the container build, persistence | The six-step procedure above, run end to end on Docker 29.7.2 / Compose v5.4.0; plus every endpoint exercised by hand against the containerised stack | **All pass** |
+| That the `CHECK` constraint is real | `INSERT INTO tasks (title) VALUES ('   ');` straight through `psql`, bypassing the API entirely | **Rejected**, as intended |
 
 Run it yourself — no Docker and no database needed, because it uses the in-memory repository:
 

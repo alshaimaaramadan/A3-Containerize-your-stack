@@ -6,6 +6,11 @@ verified separately, against the real database.
 import os
 import sys
 
+# Run as `python scripts/smoke_test.py` and Python puts scripts/ on sys.path --
+# not the project root -- so `import app.main` below would not resolve. Add the
+# root ourselves, so the command works from wherever you happen to be standing.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 os.environ.setdefault("DATABASE_URL", "postgresql://unused:unused@localhost:5432/unused")
 
 from fastapi.testclient import TestClient  # noqa: E402
