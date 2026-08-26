@@ -1,0 +1,14 @@
+# Pinned exactly. An image rebuilt in three months must install what this was
+# written and checked against, not whatever is newest that day.
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# The Postgres driver. [binary] ships a precompiled libpq, so neither the image
+# build nor a local install needs a C toolchain.
+psycopg[binary]==3.2.3
+# The connection pool. A separate distribution on its own release cycle, so it
+# is pinned here rather than left to `psycopg[pool]` to resolve.
+psycopg-pool==3.3.1
+
+python-dotenv==1.0.1

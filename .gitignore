@@ -1,0 +1,17 @@
+# Secrets — the real connection string lives here and must never be committed.
+# .env.example is committed instead, with placeholder values.
+.env
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

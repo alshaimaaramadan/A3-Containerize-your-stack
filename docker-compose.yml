@@ -1,0 +1,69 @@
+# The whole stack: the API and its database, started together with
+#
+#     docker compose up
+#
+# Values written as ${...} come from the .env file sitting next to this one.
+# Compose reads that file itself, before any container starts. .env is
+# gitignored — see .env.example for the template.
+
+# An explicit project name. Without it compose derives one from the directory,
+# and this directory has spaces in it -- the derived name, and so the volume
+# name your data lives under, would depend on what the folder happens to be
+# called. Pinning it means the volume is always `taskapi_pgdata`.
+name: taskapi
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: taskapi-db
+    restart: unless-stopped
+    environment:
+      # The :? forms make a missing value a clear error at `docker compose up`
+      # rather than a database quietly created with a name nothing expects.
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    ports:
+      # Published so you can reach the database from your machine — psql, a GUI,
+      # or uvicorn run outside the stack. The API container does not need this;
+      # it talks to `db` over the compose network.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # THIS is the persistence. A named volume lives outside the container, so
+      # `docker compose down` and `docker compose up` give you a new container
+      # reading the same data directory. Without it the database would be part
+      # of the container's own writable layer and would die with it.
+      - pgdata:/var/lib/postgresql/data
+      # Run once, when the data directory is empty: creates the tasks table.
+      # Read-only, because the database has no business editing our schema file.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # $$ escapes the $ so compose passes it through and the shell inside the
+      # container expands it, rather than compose substituting it out here.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build: .
+    container_name: taskapi-app
+    restart: unless-stopped
+    environment:
+      # The app's own DATABASE_URL, built from the same .env values the database
+      # was created with. The host is `db` — the service name, which resolves on
+      # the compose network — and not localhost, which inside a container means
+      # that container.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      db:
+        # Not just "start db first" — wait until pg_isready succeeds. Postgres
+        # takes a few seconds to accept connections after the process starts,
+        # and without this the API would come up first and fail to connect.
+        condition: service_healthy
+
+volumes:
+  pgdata:

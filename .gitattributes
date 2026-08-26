@@ -1,0 +1,4 @@
+# Everything in this repo ends up inside a Linux container sooner or later.
+# Force LF in the working tree as well as the index, so a clone on Windows
+# cannot hand Postgres a schema file or Docker a Dockerfile full of CRLF.
+* text=auto eol=lf

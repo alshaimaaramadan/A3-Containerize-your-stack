@@ -1,0 +1,15 @@
+# Never let the real secrets into an image layer.
+.env
+
+.git/
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+README.md
+docs/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
